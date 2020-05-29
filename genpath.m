@@ -1,6 +1,8 @@
 function [pathStates] = genpath(map, start, goal)
 % Show the start and goal positions of the robot
 figure;
+hold on;
+
 plot(start(1), start(2), 'ro')
 plot(goal(1), goal(2), 'mo')
 

@@ -25,9 +25,10 @@ while ri < ru
     ri = ri + incSize;
 
 end
+ri = ri - incSize;
 
 result = 1;
-xy = [(ri - incSize)*cos(angles) + xc; (ri - incSize)*sin(angles) + yc]';
+xy = [(ri)*cos(angles) + xc; (ri)*sin(angles) + yc]';
 plot(xy(:,1),xy(:,2),'.','Color','r');
 hold on;
 end
