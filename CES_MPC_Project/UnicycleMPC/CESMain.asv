@@ -1,0 +1,397 @@
+close all;
+clear;
+
+
+% % Unicycle Dynamics Robot
+% The model has six states:
+% 
+% * x(1) - x inertial coordinate of center of mass
+% * x(2) - y inertial coordinate of center of mass
+% * x(3) - theta, robot (thrust) direction
+
+%%
+% Specify the initial conditions and state info for the robot.
+nx = 3;
+ny = 3;
+nu = 2;
+x0 = [0;0;pi/4];  % robot parks at [-10, -10], facing north
+u0 = zeros(nu,1);           % V,omega zero
+xf = [10;10;0];
+[convPath,velPath,obs] = CESAlg(x0',xf');
+spdPath = vecnorm(velPath,2,2);
+cesdt = max(10/sum(velPath(:,1)), 10/sum(velPath(:,2)));
+Ts = 0.425;
+PH = 10;
+CH = 4;
+wPath = [0];
+for i=2:size(convPath,1)
+    wPath = [wPath; (convPath(i,3)-convPath(i-1,3))/cesdt];
+end
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Trajectory Planning %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% %%
+% % Specify the prediction model state function using the function name. You
+% % can also specify functions using a function handle.
+% nlobj = nlmpc(nx,ny,nu);
+% nlobj.Model.StateFcn = "CESFun";
+% 
+% %%
+% % Specify the Jacobian of the state function using a function handle. It is
+% % best practice to provide an analytical Jacobian for the prediction model.
+% % Doing so significantly improves simulation efficiency. 
+% nlobj.Jacobian.StateFcn = @CESJacobianFun;
+% 
+% %%
+% % For this example, the target prediction time is |12| seconds. Therefore,
+% % specify a sample time of |0.4| seconds and prediction horizon of |30|
+% % steps.
+% Ts = 0.4;
+% p = 30;
+% nlobj.Ts = Ts;
+% nlobj.PredictionHorizon = p;
+% 
+% %%
+% % To perform trajectory planning instead of feedback control, use the
+% % maximum control horizon, which provides the maximum number of decision
+% % variables for the optimization problem. Since trajectory planning usually
+% % runs at a much slower sampling rate than a feedback controller, the extra
+% % computation load introduced by a large control horizon can be tolerated.
+% % Set the control horizon equal to the prediction horizon.
+% nlobj.ControlHorizon = p;
+% 
+% %%
+% % Custom non-linear cost function
+% %nlobj.Optimization.CustomCostFcn = @(X,U,e,data) Ts*sum(sum(U(1:p,:)));
+% 
+% %%
+% % For this example, the custom cost function replaces the default cost
+% % function that is typically used in feedback control.
+% %nlobj.Optimization.ReplaceStandardCost = true;
+% 
+% 
+% %%
+% % The goal of the maneuver is to park the robot at |[0,0]| with an angle of
+% % |0| radians at the 12th second. Specify this goal as equality constraints
+% % on the states, where every position and velocity state at the last
+% % prediction step should be zero. 
+% nlobj.Optimization.CustomEqConFcn = @(X,U,data) X(end,:)' - xf;
+% 
+% %%
+% % It is best practice to provide analytical Jacobian functions for your
+% % custom cost and constraint functions as well. However, this example
+% % intentionally skips them so that their Jacobian is computed by the
+% % nonlinear MPC controller using the built-in numerical perturbation
+% % method.
+% 
+% %%
+% % Each thrust has an operating range between |0| and |1|, which is
+% % translated into lower and upper bounds on the MVs.
+% nlobj.MV(1).Min = 0; %min Vx
+% nlobj.MV(1).Max = 2; %max Vx
+% nlobj.MV(2).Min = -0.25; %min omega
+% nlobj.MV(2).Max = 0.25; %max omega
+% 
+% 
+% %%
+% % It is best practice to validate the user-provided model, cost, and
+% % constraint functions and their Jacobians. To do so, use the
+% % |validateFcns| command.
+% validateFcns(nlobj,x0,u0); % need to create a C
+% 
+% %%
+% % The optimal state and MV trajectories can be found by calling the
+% % |nlmpcmove| command once, given the current state |x0| and last MV |u0|.
+% % The optimal cost and trajectories are returned as part of the |info|
+% % output argument.
+% [~,~,info] = nlmpcmove(nlobj,x0,u0);
+% 
+% %%
+% % Plot the optimal trajectory.
+% CESPlanning(info);
+
+%%
+% The first plot shows the optimal trajectory of the three robot states
+% during the maneuver. The second plot shows the corresponding optimal MV
+% profiles for V, w. The third plot shows the X-Y position
+% trajectory of the robot, moving from |[-10 -10 pi/2]| to |[0 0 0]|.
+
+% %%%%%%%%%%%%%%%%%%%%%% Path Tracking (Trajectory Guesses) %%%%%%%%%%%%%%%%%
+% %
+% nlobj_tracking = nlmpc(nx,ny,nu);
+% 
+% %% 
+% % Use the same state function and its Jacobian function.
+% nlobj_tracking.Model.StateFcn = "CESFun";
+% nlobj_tracking.Jacobian.StateFcn = @CESJacobianFun;
+% 
+% %%
+% % For feedback control applications, reduce the computational effort by
+% % specifying shorter prediction and control horizons.
+% Ts = 0.7;
+% nlobj_tracking.Ts = Ts;
+% PH = 10;
+% CH = 4;
+% nlobj_tracking.PredictionHorizon = PH;
+% nlobj_tracking.ControlHorizon = CH;
+% 
+% %% 
+% % The default cost function in nonlinear MPC is a standard quadratic cost
+% % function suitable for reference tracking and disturbance rejection. For
+% % tracking, the states have higher priority (larger penalty weights) than
+% % the MV moves.
+% 
+% nlobj_tracking.Optimization.CustomCostFcn = @(X,U,e,data) CESTerminalFn(X,U,e,data);
+% nlobj_tracking.Optimization.ReplaceStandardCost = false;
+% %nlobj_tracking.Weights.ManipulatedVariables = 2*ones(1,nu);
+% nlobj_tracking.Weights.ManipulatedVariablesRate = 0*ones(1,nu);
+% nlobj_tracking.Weights.OutputVariables = 0*ones(1,nx);
+% 
+% %% Custom Avoidance Constraint
+% nlobj_tracking.Optimization.CustomIneqConFcn = @(X,U,e,data) CESAvoidanceFn(X,U,e,data);
+% 
+% %% 
+% % Set the same bounds for the V,w inputs
+% nlobj_tracking.MV(1).Min = 0;
+% nlobj_tracking.MV(1).Max = 4;
+% nlobj_tracking.MV(2).Min = -.25;
+% nlobj_tracking.MV(2).Max = .25;
+% 
+% %%
+% % Validate your prediction model and custom functions, and their Jacobians.
+% validateFcns(nlobj_tracking,x0,u0);
+% 
+% %% Nonlinear State Estimation
+% % In this example, only the three position states (x, y and angle) are
+% % measured. Use an extended Kalman filter (EKF) from Control System Toolbox(TM) for
+% % nonlinear state estimation.
+% %
+% % Because an EKF requires a discrete-time model, you use the trapezoidal
+% % rule to transition from x(k) to x(k+1), which requires the solution of
+% % |nx| nonlinear algebraic equations. For more information, open
+% % |FlyingRobotStateFcnDiscreteTime.m|.
+% DStateFcn = @(xk,uk,Ts) CESFunDT(xk,uk,Ts);
+% 
+% %%
+% % Measurement can help the EKF correct its state estimation. 
+% DMeasFcn = @(xk) xk(1:3);
+% 
+% %%
+% % Create the EKF, and indicate that the measurements have little noise.
+% EKF = extendedKalmanFilter(DStateFcn,DMeasFcn,x0);
+% EKF.MeasurementNoise = 0.01;
+% 
+% %% Closed-Loop Simulation of Tracking Control
+% % Simulate the system for |32| steps with correct initial conditions.
+% Tsteps = 26;        
+% xHistory = x0';
+% uHistory = [];
+% lastMV = zeros(nu,1);
+% p = size(convPath,1) - 1;
+% 
+% %%
+% % The reference signals are the optimal state trajectories computed at the
+% % planning stage. When passing these trajectories to the nonlinear MPC
+% % controller, the current and future trajectory is available for
+% % previewing.
+% % Xopt = info.Xopt;
+% % Xref = [Xopt(2:p+1,:);repmat(Xopt(end,:),Tsteps-p,1)];
+% % Uopt = info.MVopt;
+% Xopt = convPath;
+% Xref = [convPath(2:p+1,:);repmat(convPath(end,:),Tsteps-p,1)];
+% 
+% %%
+% % Use |nlmpcmove| and |nlmpcmoveopt| command for closed-loop simulation.
+% hbar = waitbar(0,'Simulation Progress');
+% options = nlmpcmoveopt;
+% for k = 1:Tsteps
+%     options.X0 = Xref(k:min(k+PH-1,Tsteps),:);
+%     % Obtain plant output measurements with sensor noise.
+%     yk = xHistory(k,1:3)' + randn*0.01;
+%     % Correct state estimation based on the measurements.
+%     xk = correct(EKF, yk);
+%     % Compute the control moves with reference previewing.
+%     endvec = zeros(size(options.X0));
+%     endvec(end,:) = options.X0(end,:);
+%     [uk,options] = nlmpcmove(nlobj_tracking,xk,lastMV,endvec,[],options);
+%     % Predict the state for the next step.
+%     predict(EKF,uk,Ts);
+%     % Store the control move and update the last MV for the next step.
+%     uHistory(k,:) = uk';
+%     lastMV = uk;
+%     % Update the real plant states for the next step by solving the
+%     % continuous-time ODEs based on current states xk and input uk.
+%     ODEFUN = @(t,xk) CESFun(xk,uk);
+%     [TOUT,YOUT] = ode45(ODEFUN,[0 Ts], xHistory(k,:)');
+%     % Store the state values.
+%     xHistory(k+1,:) = YOUT(end,:);            
+%     % Update the status bar.
+%     waitbar(k/Tsteps, hbar);
+% end
+% close(hbar)
+% 
+% %% 
+% % Compare the planned and actual closed-loop trajectories.
+% %CESPlotTracking(info,Ts,p,Tsteps,xHistory,uHistory);
+% CESPlotTrackingNI(Xopt,Ts,p,Tsteps,xHistory,uHistory,obs);
+% 
+% %%
+% % The nonlinear MPC feedback controller successfully moves the robot,
+% % following the optimal trajectory, and parks it
+% % at the final location in the last figure.
+
+%%%%%%%%%%%%%%%%%%%%%% Path Tracking (Trajectory Reference) %%%%%%%%%%%%%%%%%
+%
+nlobj_tracking = nlmpc(nx,ny,nu);
+
+%% 
+% Use the same state function and its Jacobian function.
+nlobj_tracking.Model.StateFcn = "CESFun";
+nlobj_tracking.Jacobian.StateFcn = @CESJacobianFun;
+
+%%
+% For feedback control applications, reduce the computational effort by
+% specifying shorter prediction and control horizons.
+nlobj_tracking.Ts = Ts;
+nlobj_tracking.PredictionHorizon = PH;
+nlobj_tracking.ControlHorizon = CH;
+
+%% 
+% The default cost function in nonlinear MPC is a standard quadratic cost
+% function suitable for reference tracking and disturbance rejection. For
+% tracking, the states have higher priority (larger penalty weights) than
+% the MV moves.
+nlobj_tracking.Optimization.CustomCostFcn = @(X,U,e,data) CESTerminalFn(X,U,e,data);
+nlobj_tracking.Optimization.ReplaceStandardCost = false;
+%nlobj_tracking.Weights.ManipulatedVariables = 2*ones(1,nu);
+nlobj_tracking.Weights.ManipulatedVariablesRate = 0.2*ones(1,nu);
+nlobj_tracking.Weights.OutputVariables = 5*ones(1,nx);
+
+%% Custom Avoidance Constraint
+nlobj_tracking.Optimization.CustomIneqConFcn = @(X,U,e,data) CESAvoidanceFn(X,U,e,data);
+
+%% 
+% Set the same bounds for the V,w inputs
+nlobj_tracking.MV(1).Min = 0;
+nlobj_tracking.MV(1).Max = 2;
+nlobj_tracking.MV(2).Min = -.2;
+nlobj_tracking.MV(2).Max = .2;
+
+%%
+% Validate your prediction model and custom functions, and their Jacobians.
+validateFcns(nlobj_tracking,x0,u0);
+
+%% Nonlinear State Estimation
+% In this example, only the three position states (x, y and angle) are
+% measured. Use an extended Kalman filter (EKF) from Control System Toolbox(TM) for
+% nonlinear state estimation.
+%
+% Because an EKF requires a discrete-time model, you use the trapezoidal
+% rule to transition from x(k) to x(k+1), which requires the solution of
+% |nx| nonlinear algebraic equations. For more information, open
+DStateFcn = @(xk,uk,Ts) CESFunDT(xk,uk,Ts);
+
+%%
+% Measurement can help the EKF correct its state estimation. 
+DMeasFcn = @(xk) xk(1:3);
+
+%%
+% Create the EKF, and indicate that the measurements have little noise.
+EKF = extendedKalmanFilter(DStateFcn,DMeasFcn,x0);
+EKF.MeasurementNoise = 0.01;
+
+%% Closed-Loop Simulation of Tracking Control
+% Simulate the system for |32| steps with correct initial conditions.
+Tsteps = 26;        
+xHistory = x0';
+uHistory = [];
+lastMV = zeros(nu,1);
+p = size(convPath,1) - 1;
+
+%%
+% The reference signals are the optimal state trajectories computed at the
+% planning stage. When passing these trajectories to the nonlinear MPC
+% controller, the current and future trajectory is available for
+% previewing.
+% Xopt = info.Xopt;
+% Xref = [Xopt(2:p+1,:);repmat(Xopt(end,:),Tsteps-p,1)];
+% Uopt = info.MVopt;
+Xopt = convPath;
+Xref = [convPath(2:p+1,:);repmat(convPath(end,:),Tsteps-p,1)];
+
+%%
+% Use |nlmpcmove| and |nlmpcmoveopt| command for closed-loop simulation.
+hbar = waitbar(0,'Simulation Progress');
+options = nlmpcmoveopt;
+
+% for k = 1:Tsteps
+%     tic
+%     % Obtain plant output measurements with sensor noise.
+%     yk = xHistory(k,1:3)' + randn*0.01;
+%     % Correct state estimation based on the measurements.
+%     xk = correct(EKF, yk);
+%     % Compute the control moves with reference previewing.
+%     [uk,options] = nlmpcmove(nlobj_tracking,xk,lastMV,Xref(k:min(k+PH-1,Tsteps),:),[],options);
+%     % Predict the state for the next step.
+%     predict(EKF,uk,Ts);
+%     % Store the control move and update the last MV for the next step.
+%     uHistory(k,:) = uk';
+%     lastMV = uk;
+%     % Update the real plant states for the next step by solving the
+%     % continuous-time ODEs based on current states xk and input uk.
+%     ODEFUN = @(t,xk) CESFun(xk,uk);
+%     [TOUT,YOUT] = ode45(ODEFUN,[0 Ts], xHistory(k,:)');
+%     % Store the state values.
+%     xHistory(k+1,:) = YOUT(end,:);            
+%     % Update the status bar.
+%     waitbar(k/Tsteps, hbar);
+%     toc
+% end
+
+for k = 1:Tsteps
+    options.X0 = Xref(k:min(k+PH-1,Tsteps),:);
+    % Obtain plant output measurements with sensor noise.
+    yk = xHistory(k,1:3)' + randn*0.01;
+    % Correct state estimation based on the measurements.
+    xk = correct(EKF, yk);
+    % Compute the control moves with reference previewing.
+    endvec = zeros(size(options.X0));
+    endvec(end,:) = options.X0(end,:);
+    [uk,options] = nlmpcmove(nlobj_tracking,xk,lastMV,endvec,[],options);
+    % Predict the state for the next step.
+    predict(EKF,uk,Ts);
+    % Store the control move and update the last MV for the next step.
+    uHistory(k,:) = uk';
+    lastMV = uk;
+    % Update the real plant states for the next step by solving the
+    % continuous-time ODEs based on current states xk and input uk.
+    ODEFUN = @(t,xk) CESFun(xk,uk);
+    [TOUT,YOUT] = ode45(ODEFUN,[0 Ts], xHistory(k,:)');
+    % Store the state values.
+    xHistory(k+1,:) = YOUT(end,:);            
+    % Update the status bar.
+    waitbar(k/Tsteps, hbar);
+end
+
+close(hbar)
+
+%% 
+% Compare the planned and actual closed-loop trajectories.
+%CESPlotTracking(info,Ts,p,Tsteps,xHistory,uHistory);
+CESPlotTrackingNI(Xopt,Ts,p,Tsteps,xHistory,uHistory,obs);
+
+%%
+% The nonlinear MPC feedback controller successfully moves the robot,
+% following the optimal trajectory, and parks it
+% at the final location in the last figure.
+
+% meta
+
+% maxin = max(uHistory)
+% minin = min(uHistory);
+% maxCESin = max([spdPath,wPath])
+% minCESin = min([spdPath,wPath]);
+% estT = length(convPath)*cesdt
+traj_t = Ts*p
